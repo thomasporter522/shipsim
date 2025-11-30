@@ -13,7 +13,7 @@ const WATER_COLOR = "rgb(100,200,250)";
 const WIND_COLOR = "rgb(150,225,250)";
 
 const WINDSCALE = 4;
-const DRAG = 0.01;
+const DRAG = 0.1;
 
 // Utility functions
 function rotate(v, heading) {
@@ -333,6 +333,7 @@ class ShipGame {
         
         // Clamp rudder angle
         this.rudderAngle = Math.max(-Math.PI / 8, Math.min(Math.PI / 8, this.rudderAngle));
+        this.rudderAngle -= Math.sign(this.rudderAngle) * this.speed * 0.001
         
         // Clamp sail angle
         this.sailAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.sailAngle));
@@ -361,8 +362,8 @@ class ShipGame {
         const netEfficiency = windForceEfficiency * Math.abs(forwardEfficiency);
 
         
-        // Cap speed to prevent unrealistic acceleration
-        this.speed = Math.min(this.speed, 2 * windSpeed);
+        // // Cap speed to prevent unrealistic acceleration
+        // this.speed = Math.min(this.speed, 2 * windSpeed);
         
         // Calculate apparent wind (wind relative to moving ship)
         const windwardShipSpeed = this.speed * efficiency(windHeading, this.heading);
@@ -381,7 +382,6 @@ class ShipGame {
         // this.speed = Math.max(0, this.speed);
         
         this.heading -= this.speed * 0.015 * Math.tan(this.rudderAngle);
-        console.log("heading: " + this.heading);
         
         this.shipPos = sum(this.shipPos, {
             x: this.speed * Math.sin(this.heading),
