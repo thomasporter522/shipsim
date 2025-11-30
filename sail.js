@@ -367,12 +367,12 @@ class ShipGame {
         }
 
         // Efficiency coefficient of wind force to mast
-        const sailPerpendicular = this.heading + this.sailAngle - Math.sign(this.sailAngle) * Math.PI / 2;
+        const sailPerpendicular = this.heading + this.sailAngle - (this.sailAngle > 0 ? Math.PI / 2 : - Math.PI / 2);
         const windForceEfficiency = Math.max(0, efficiency(windHeading, sailPerpendicular));
 
         // Efficiency coefficient of mast force to keel direction
         const forwardEfficiency = efficiency(this.heading, sailPerpendicular);
-        
+
         const netEfficiency = windForceEfficiency * Math.abs(forwardEfficiency);
         const windwardShipSpeed = this.speed * Math.abs(efficiency(windHeading, this.heading));
         const relativeWindSpeed = windSpeed - windwardShipSpeed;
