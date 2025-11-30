@@ -12,7 +12,8 @@ const RUDDER_COLOR = SHIP_COLOR;
 const WATER_COLOR = "rgb(100,200,250)";
 const WIND_COLOR = "rgb(150,225,250)";
 
-const DRAG = 0.99;
+const WINDSCALE = 4;
+const DRAG = 0.01;
 
 // Utility functions
 function rotate(v, heading) {
@@ -52,9 +53,9 @@ function worldToScreen(worldPos, shipPos) {
 
 // Ship and sailing functions
 function shipTriangle(pos, heading) {
-    const v0 = { x: 0, y: -SHIP_LENGTH * 0.3 };
-    const v1 = { x: -SHIP_WIDTH / 2, y: SHIP_LENGTH * 0.7 };
-    const v2 = { x: SHIP_WIDTH / 2, y: SHIP_LENGTH * 0.7 };
+    const v0 = { x: 0, y: SHIP_LENGTH * 0.3 };
+    const v1 = { x: SHIP_WIDTH / 2, y: -SHIP_LENGTH * 0.7 };
+    const v2 = { x: -SHIP_WIDTH / 2, y: -SHIP_LENGTH * 0.7 };
     
     return [
         sum(pos, rotate(v0, heading)),
@@ -64,11 +65,11 @@ function shipTriangle(pos, heading) {
 }
 
 function shipPentagon(pos, heading) {
-    const v0 = { x: 0, y: -SHIP_LENGTH * 0.3 };
-    const v1 = { x: -SHIP_WIDTH / 2, y: 0 };
-    const v2 = { x: SHIP_WIDTH / 2, y: 0 };
-    const v3 = { x: -SHIP_WIDTH / 2, y: SHIP_LENGTH * 0.7 };
-    const v4 = { x: SHIP_WIDTH / 2, y: SHIP_LENGTH * 0.7 };
+    const v0 = { x: 0, y: SHIP_LENGTH * 0.3 };
+    const v1 = { x: SHIP_WIDTH / 2, y: 0 };
+    const v2 = { x: -SHIP_WIDTH / 2, y: 0 };
+    const v3 = { x: +SHIP_WIDTH / 2, y: -SHIP_LENGTH * 0.7 };
+    const v4 = { x: -SHIP_WIDTH / 2, y: -SHIP_LENGTH * 0.7 };
     
     return [
         sum(pos, rotate(v0, heading)),
@@ -80,26 +81,26 @@ function shipPentagon(pos, heading) {
 }
 
 function sailLine(pos, heading, sailAngle) {
-    const v = { x: 0, y: SHIP_LENGTH * 0.7 };
+    const v = { x: 0, y: -SHIP_LENGTH * 0.7 };
     return [pos, sum(pos, rotate(v, heading + sailAngle))];
 }
 
 function efficiencyLine(pos, heading, sailAngle, efficiency) {
-    const v = { x: 0, y: SHIP_LENGTH * 0.7 };
+    const v = { x: 0, y: -SHIP_LENGTH * 0.7 };
     return [pos, sum(pos, scale(rotate(v, heading + sailAngle), efficiency))];
 }
 
 function rudderLine(triangle, heading, rudderAngle) {
     const center = midpoint(triangle[1], triangle[2]);
-    const v = { x: 0, y: SHIP_LENGTH * 0.3 };
+    const v = { x: 0, y: -SHIP_LENGTH * 0.3 };
     return [center, sum(center, rotate(v, heading + rudderAngle))];
 }
 
 function windicator(windHeading, windSpeed) {
     const center = { x: 100, y: 100 };
-    const v0 = scale({ x: 30, y: -20 }, 10 * windSpeed);
-    const v1 = scale({ x: -30, y: -20 }, 10 * windSpeed);
-    const v2 = scale({ x: 0, y: 50 }, 10 * windSpeed);
+    const v0 = scale({ x: -30, y: 20 }, 10 * windSpeed/WINDSCALE/5);
+    const v1 = scale({ x: 30, y: 20 }, 10 * windSpeed/WINDSCALE/5);
+    const v2 = scale({ x: 0, y: -50 }, 10 * windSpeed/WINDSCALE/5);
     
     return [
         sum(center, rotate(v0, windHeading)),
@@ -111,15 +112,6 @@ function windicator(windHeading, windSpeed) {
 
 function efficiency(angle1, angle2) {
     return Math.cos(angle1 - angle2);
-}
-
-// Returns force heading and efficiency multiplier
-function windForce(heading, sailAngle, windHeading) {
-    const sailPerpendicular = heading + sailAngle + Math.PI / 2;
-    return {
-        heading: sailPerpendicular,
-        efficiency: efficiency(windHeading, sailPerpendicular)
-    };
 }
 
 function generateLand(position, variance, n) {
@@ -192,8 +184,8 @@ function renderLand(ctx, position, dots) {
 function windFunction(t) {
     const heading = t / (60 * 60) * Math.PI * 2 + Math.cos(t / (60 * 60)) + 
                    0.02 * (Math.cos(t / 50) + Math.cos(t / 40) + Math.cos(t / 30) + Math.cos(t / 20));
-    let speed = (Math.cos(t / (60 * 20)) ** 2 + Math.cos(t / (60 * 30)) ** 2) / 16;
-    speed = speed * 0.5 + 0.05;
+    let speed = (Math.cos(t / (60 * 20)) ** 2 + Math.cos(t / (60 * 30)) ** 2);
+    speed = (1 + speed) / 3;
     return { heading, speed };
 }
 
@@ -326,7 +318,7 @@ class ShipGame {
         this.tick++;
         const wind = windFunction(this.tick);
         const windHeading = wind.heading;
-        const windSpeed = wind.speed;
+        const windSpeed = WINDSCALE * wind.speed;
         
         const releasing = this.handleInput();
         
@@ -360,19 +352,36 @@ class ShipGame {
             }
         }
         
-        // Calculate wind force
-        const windForceResult = windForce(this.heading, this.sailAngle, windHeading);
-        const windForceHeading = windForceResult.heading;
-        const windForceEfficiency = windForceResult.efficiency;
+        // Calculate wind force on sail
+        const sailPerpendicular = this.heading + this.sailAngle + Math.PI / 2;
+        const windForceEfficiency = Math.abs(efficiency(windHeading, sailPerpendicular));
         
-        const netEfficiency = windForceEfficiency * efficiency(this.heading, windForceHeading);
-        const netWindForce = windSpeed * netEfficiency;
+        // Calculate how much of that force pushes the ship forward
+        const forwardEfficiency = efficiency(this.heading, sailPerpendicular);
+        const netEfficiency = windForceEfficiency * Math.abs(forwardEfficiency);
+
         
-        // Update speed and position
-        this.speed += netWindForce;
-        this.speed *= DRAG;
+        // Cap speed to prevent unrealistic acceleration
+        this.speed = Math.min(this.speed, 2 * windSpeed);
         
-        this.heading += this.speed * 0.015 * Math.tan(this.rudderAngle);
+        // Calculate apparent wind (wind relative to moving ship)
+        const windwardShipSpeed = this.speed * efficiency(windHeading, this.heading);
+        const relativeWindSpeed = Math.max(0, windSpeed - windwardShipSpeed);
+        
+        // Calculate net wind force - this should be signed to indicate direction
+        let netWindForce = relativeWindSpeed * netEfficiency;
+        
+        // Apply drag to slow down the ship
+        const dragForce = DRAG * this.speed * Math.abs(this.speed);
+        
+        // Update speed with wind force and drag
+        this.speed += netWindForce - dragForce;
+        
+        // // Prevent negative speeds (ship can't go backwards from wind alone)
+        // this.speed = Math.max(0, this.speed);
+        
+        this.heading -= this.speed * 0.015 * Math.tan(this.rudderAngle);
+        console.log("heading: " + this.heading);
         
         this.shipPos = sum(this.shipPos, {
             x: this.speed * Math.sin(this.heading),
@@ -400,10 +409,10 @@ class ShipGame {
         drawLine(this.ctx, sailLinePoints[0], sailLinePoints[1], SAIL_COLOR, 5);
         
         // Draw efficiency lines
-        const effLineBlue = efficiencyLine(SCREENCENTER, this.heading, this.sailAngle, Math.abs(windForceEfficiency));
+        const effLineBlue = efficiencyLine(SCREENCENTER, this.heading, this.sailAngle, windForceEfficiency);
         drawLine(this.ctx, effLineBlue[0], effLineBlue[1], "rgb(0,0,255)", 5);
         
-        const effLineRed = efficiencyLine(SCREENCENTER, this.heading, this.sailAngle, Math.abs(netEfficiency));
+        const effLineRed = efficiencyLine(SCREENCENTER, this.heading, this.sailAngle, netEfficiency);
         drawLine(this.ctx, effLineRed[0], effLineRed[1], "rgb(255,0,0)", 5);
         
         // Draw rudder
