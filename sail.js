@@ -11,9 +11,15 @@ const SAIL_COLOR = "rgb(255,255,255)";
 const RUDDER_COLOR = SHIP_COLOR;
 const WATER_COLOR = "rgb(100,200,250)";
 const WIND_COLOR = "rgb(150,225,250)";
+const CLEAR_WIND_COLOR = "rgba(150,225,250,0.5)"
+const EFFICIENCY_COLOR_MAIN = "rgb(255,0,0)"
+const EFFICIENCY_COLOR_SECOND = "rgb(255, 169, 169)"
 
-const WINDSCALE = 4;
-const DRAG = 0.1;
+const WINDSCALE = 8;
+const DRAG = 0.05;
+
+const WINDPARA = true;
+const DRAGVECTOR = false;
 
 // Utility functions
 function rotate(v, heading) {
@@ -96,11 +102,22 @@ function rudderLine(triangle, heading, rudderAngle) {
     return [center, sum(center, rotate(v, heading + rudderAngle))];
 }
 
+function dragLine(triangle, heading, dragForce) {
+    const center = midpoint(triangle[1], triangle[2]);
+    const v = { x: 0, y: -dragForce * 10 };
+    return [center, sum(center, rotate(v, heading))];
+}
+
+function relWindPara(endpoints, windHeading, relSpeed) {
+    const v = { x: 0, y: -relSpeed * 10 };
+    return [endpoints[1], sum(endpoints[1], rotate(v, windHeading)), sum(endpoints[0], rotate(v, windHeading)), endpoints[0]];
+}
+
 function windicator(windHeading, windSpeed) {
     const center = { x: 100, y: 100 };
-    const v0 = scale({ x: -30, y: 20 }, 10 * windSpeed/WINDSCALE/5);
-    const v1 = scale({ x: 30, y: 20 }, 10 * windSpeed/WINDSCALE/5);
-    const v2 = scale({ x: 0, y: -50 }, 10 * windSpeed/WINDSCALE/5);
+    const v0 = scale({ x: -30, y: 20 }, 10 * windSpeed/WINDSCALE/7);
+    const v1 = scale({ x: 30, y: 20 }, 10 * windSpeed/WINDSCALE/7);
+    const v2 = scale({ x: 0, y: -50 }, 10 * windSpeed/WINDSCALE/7);
     
     return [
         sum(center, rotate(v0, windHeading)),
@@ -182,10 +199,10 @@ function renderLand(ctx, position, dots) {
 }
 
 function windFunction(t) {
-    const heading = t / (60 * 60) * Math.PI * 2 + Math.cos(t / (60 * 60)) + 
+    const heading = t / (60 * 60 * 5) * Math.PI * 2 + Math.cos(t / (60 * 60)) + 0.1 * Math.sin(t / (60 * 40)) +
                    0.02 * (Math.cos(t / 50) + Math.cos(t / 40) + Math.cos(t / 30) + Math.cos(t / 20));
-    let speed = (Math.cos(t / (60 * 20)) ** 2 + Math.cos(t / (60 * 30)) ** 2);
-    speed = (1 + speed) / 3;
+    let speed = (Math.sin(t / (60 * 20)) ** 2 + Math.cos(t / (60 * 30)) ** 2);
+    speed = (2 + speed) / 4;
     return { heading, speed };
 }
 
@@ -232,9 +249,9 @@ class ShipGame {
         // Game state
         this.shipPos = { x: 250, y: 250 };
         this.heading = 0;
-        this.sailAngle = -Math.PI / 4;
-        this.rudderAngle = 0.1;
-        this.speed = 0;
+        this.sailAngle = 0;
+        this.rudderAngle = 0;
+        this.speed = 0.0;
         this.tick = 0;
         
         // End point and timer
@@ -328,70 +345,55 @@ class ShipGame {
             this.completionTime = Date.now();
         }
         
-        // Normalize heading to 0-2π range
+        // Normalize heading
         this.heading = ((this.heading % (2 * Math.PI)) + (2 * Math.PI)) % (2 * Math.PI);
-        
-        // Clamp rudder angle
+        // Clamp sail and rudder
+        this.sailAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.sailAngle));        
         this.rudderAngle = Math.max(-Math.PI / 8, Math.min(Math.PI / 8, this.rudderAngle));
+        
+        // Rudder reverts to cetner
         this.rudderAngle -= Math.sign(this.rudderAngle) * this.speed * 0.001
         
-        // Clamp sail angle
-        this.sailAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.sailAngle));
-        
-        // Auto-adjust sail angle based on wind (matching Python logic exactly)
+        // Sail reverts to wind direction
         let tweakAngle = this.sailAngle + this.heading - windHeading;
         tweakAngle = ((tweakAngle % (2 * Math.PI)) + (2 * Math.PI)) % (2 * Math.PI);
         const windRotationPositive = tweakAngle > Math.PI;
-        
-        // The wind naturally pushes the sail towards the optimal side
-        // The key insight: if windRotationPositive != (sailAngle > 0), the wind wants the sail on the opposite side
-        if (releasing || windRotationPositive !== (this.sailAngle > 0)) {
+        if (releasing) {
             if (windRotationPositive) {
-                this.sailAngle += 0.05;  // Move sail angle towards positive
+                this.sailAngle += 0.05; 
             } else {
-                this.sailAngle -= 0.05;  // Move sail angle towards negative
+                this.sailAngle -= 0.05;  
+            }
+        }
+        else if (windRotationPositive !== (this.sailAngle > 0)) {
+            if (windRotationPositive) {
+                this.sailAngle = Math.min(0, this.sailAngle + 0.05); 
+            } else {
+                this.sailAngle = Math.max(0, this.sailAngle - 0.05);  
             }
         }
         
-        // Calculate wind force on sail
         const sailPerpendicular = this.heading + this.sailAngle + Math.PI / 2;
         const windForceEfficiency = Math.abs(efficiency(windHeading, sailPerpendicular));
-        
-        // Calculate how much of that force pushes the ship forward
         const forwardEfficiency = efficiency(this.heading, sailPerpendicular);
         const netEfficiency = windForceEfficiency * Math.abs(forwardEfficiency);
-
-        
-        // // Cap speed to prevent unrealistic acceleration
-        // this.speed = Math.min(this.speed, 2 * windSpeed);
-        
-        // Calculate apparent wind (wind relative to moving ship)
-        const windwardShipSpeed = this.speed * efficiency(windHeading, this.heading);
-        const relativeWindSpeed = Math.max(0, windSpeed - windwardShipSpeed);
-        
-        // Calculate net wind force - this should be signed to indicate direction
+        const windwardShipSpeed = this.speed * Math.abs(efficiency(windHeading, this.heading));
+        const relativeWindSpeed = windSpeed - windwardShipSpeed;
         let netWindForce = relativeWindSpeed * netEfficiency;
         
-        // Apply drag to slow down the ship
         const dragForce = DRAG * this.speed * Math.abs(this.speed);
         
-        // Update speed with wind force and drag
         this.speed += netWindForce - dragForce;
-        
-        // // Prevent negative speeds (ship can't go backwards from wind alone)
-        // this.speed = Math.max(0, this.speed);
-        
         this.heading -= this.speed * 0.015 * Math.tan(this.rudderAngle);
+        this.shipPos = {
+            x: this.shipPos.x + this.speed * Math.sin(this.heading),
+            y: this.shipPos.y + this.speed * Math.cos(this.heading)
+        };
         
-        this.shipPos = sum(this.shipPos, {
-            x: this.speed * Math.sin(this.heading),
-            y: this.speed * Math.cos(this.heading)
-        });
-        
-        return { windHeading, windSpeed, windForceEfficiency, netEfficiency };
+        return { windHeading, windSpeed, relativeWindSpeed, windForceEfficiency, netEfficiency, dragForce };
     }
     
-    render(windHeading, windSpeed, windForceEfficiency, netEfficiency) {
+    render(windHeading, windSpeed, relativeWindSpeed, windForceEfficiency, netEfficiency, dragForce) {
         // Clear screen
         this.ctx.fillStyle = WATER_COLOR;
         this.ctx.fillRect(0, 0, SCREENSIZE.width, SCREENSIZE.height);
@@ -409,15 +411,27 @@ class ShipGame {
         drawLine(this.ctx, sailLinePoints[0], sailLinePoints[1], SAIL_COLOR, 5);
         
         // Draw efficiency lines
-        const effLineBlue = efficiencyLine(SCREENCENTER, this.heading, this.sailAngle, windForceEfficiency);
-        drawLine(this.ctx, effLineBlue[0], effLineBlue[1], "rgb(0,0,255)", 5);
+        const effLineInner = efficiencyLine(SCREENCENTER, this.heading, this.sailAngle, windForceEfficiency);
+        drawLine(this.ctx, effLineInner[0], effLineInner[1], EFFICIENCY_COLOR_SECOND, 5);
         
         const effLineRed = efficiencyLine(SCREENCENTER, this.heading, this.sailAngle, netEfficiency);
-        drawLine(this.ctx, effLineRed[0], effLineRed[1], "rgb(255,0,0)", 5);
+        drawLine(this.ctx, effLineRed[0], effLineRed[1], EFFICIENCY_COLOR_MAIN, 5);
         
         // Draw rudder
         const rudderLinePoints = rudderLine(triangle, this.heading, this.rudderAngle);
         drawLine(this.ctx, rudderLinePoints[0], rudderLinePoints[1], RUDDER_COLOR, 5);
+        
+        // Draw extra vectors if enabled
+        if (DRAGVECTOR) {
+            const dragLinePoints = dragLine(triangle, this.heading, dragForce);
+            drawLine(this.ctx, dragLinePoints[0], dragLinePoints[1], "rgb(255, 187, 0)", 2);
+        }
+
+        if(WINDPARA) {
+            const relWindPoints = relWindPara(effLineRed, windHeading, relativeWindSpeed);
+            // drawLine(this.ctx, relWindPoints[0], relWindPoints[1], WIND_COLOR, 5);
+            drawPolygon(this.ctx, [relWindPoints[0], relWindPoints[1], relWindPoints[2], relWindPoints[3]], CLEAR_WIND_COLOR);
+        }
         
         // Draw wind indicator
         const windIndicatorPoints = windicator(windHeading, windSpeed);
@@ -482,17 +496,11 @@ class ShipGame {
         this.ctx.strokeStyle = "rgb(200,200,0)";
         this.ctx.lineWidth = 2;
         
-        // Draw arrow body
-        this.ctx.beginPath();
-        this.ctx.arc(markerX, markerY, arrowSize / 2, 0, 2 * Math.PI);
-        this.ctx.fill();
-        this.ctx.stroke();
-        
         // Draw arrow head
         this.ctx.beginPath();
         this.ctx.moveTo(markerX + arrowSize * Math.cos(angle), markerY + arrowSize * Math.sin(angle));
-        this.ctx.lineTo(markerX + arrowSize * 0.5 * Math.cos(angle - 2.5), markerY + arrowSize * 0.5 * Math.sin(angle - 2.5));
-        this.ctx.lineTo(markerX + arrowSize * 0.5 * Math.cos(angle + 2.5), markerY + arrowSize * 0.5 * Math.sin(angle + 2.5));
+        this.ctx.lineTo(markerX + arrowSize * Math.cos(angle - 2.5), markerY + arrowSize * Math.sin(angle - 2.5));
+        this.ctx.lineTo(markerX + arrowSize * Math.cos(angle + 2.5), markerY + arrowSize * Math.sin(angle + 2.5));
         this.ctx.closePath();
         this.ctx.fill();
         this.ctx.stroke();
@@ -528,7 +536,7 @@ class ShipGame {
     
     gameLoop() {
         const gameState = this.update();
-        this.render(gameState.windHeading, gameState.windSpeed, gameState.windForceEfficiency, gameState.netEfficiency);
+        this.render(gameState.windHeading, gameState.windSpeed, gameState.relativeWindSpeed, gameState.windForceEfficiency, gameState.netEfficiency, gameState.dragForce);
         
         setTimeout(() => this.gameLoop(), 1000 / 60); // 60 FPS
     }
